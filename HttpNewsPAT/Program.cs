@@ -47,7 +47,7 @@ namespace HttpNewsPAT
                 {
                     Console.WriteLine("\nОбновлённый список:");
                     string content = await GetContent(token);
-                    //ParsingHtml(content);
+                    ParsingHtml(content);
                 }
             }
             else if (select == "2")
@@ -62,7 +62,157 @@ namespace HttpNewsPAT
 
         public static async Task ParseGitHubTrending()
         {
-            
+            Trace.WriteLine("Начало парсинга GitHub Trending");
+
+            try
+            {
+                string url = "https://github.com/trending";
+
+                Console.WriteLine($"Парсим: {url}\n");
+
+                var response = await _httpClient.GetAsync(url);
+                string html = await response.Content.ReadAsStringAsync();
+
+                var doc = new HtmlDocument();
+                doc.LoadHtml(html);
+
+                Console.WriteLine("=== ПОПУЛЯРНЫЕ РЕПОЗИТОРИИ GITHUB ===");
+                Console.WriteLine("====================================\n");
+
+                // Ищем ВСЕ карточки репозиториев
+                // У GitHub trending каждая карточка - это <article> с классом Box-row
+                var repoArticles = doc.DocumentNode.SelectNodes("//article[contains(@class, 'Box-row')]");
+
+                if (repoArticles != null && repoArticles.Count > 0)
+                {
+                    Console.WriteLine($"Найдено репозиториев: {repoArticles.Count}\n");
+
+                    int count = 1;
+                    foreach (var article in repoArticles.Take(6)) // Берем 6 
+                    {
+                        // 1. Название репозитория (внутри h3 с классом h3)
+                        var titleElement = article.SelectSingleNode(".//h2");
+                        string title = "";
+
+                        if (titleElement != null)
+                        {
+                            // Берем весь текст из h2 и чистим его
+                            title = WebUtility.HtmlDecode(titleElement.InnerText.Trim())
+                                .Replace("\n", " ")          // Убираем переносы
+                                .Replace("  ", " ")          // Убираем двойные пробелы
+                                .Replace("  ", " ");         // Еще раз на всякий случай
+
+                            // Убираем слово "Star" если оно есть
+                            title = title.Replace("Star ", "").Replace("Unstar ", "");
+                        }
+
+                        // 2. Описание репозитория 
+                        string description = "";
+                        var descElement = article.SelectSingleNode(".//p");//абзац
+                        if (descElement != null)
+                        {
+                            description = WebUtility.HtmlDecode(descElement.InnerText.Trim());
+                            // Обрезаем если слишком длинное
+                            if (description.Length > 70)
+                                description = description.Substring(0, 70) + "...";
+                        }
+
+                        // 3. Язык программирования (опционально)
+                        string language = "";
+                        var langElement = article.SelectSingleNode(".//span[@itemprop='programmingLanguage']");
+                        if (langElement != null)
+                        {
+                            language = WebUtility.HtmlDecode(langElement.InnerText.Trim());
+                        }
+
+                        // Выводим только если есть название
+                        if (!string.IsNullOrEmpty(title) && title.Length > 5)
+                        {
+                            Console.WriteLine($"{count}. {title}");
+
+                            if (!string.IsNullOrEmpty(description))
+                                Console.WriteLine($"   {description}");
+
+                            if (!string.IsNullOrEmpty(language))
+                                Console.WriteLine($"   Язык: {language}");
+
+                            Console.WriteLine();
+                            count++;
+                        }
+                    }
+                }
+                else
+                {
+                    // РЕЗЕРВНЫЙ ВАРИАНТ 
+                    Console.WriteLine("Использую упрощенный парсинг:\n");
+
+                    // Ищем просто все ссылки, которые выглядят как репозитории
+                    var allRepoLinks = doc.DocumentNode.SelectNodes("//a[contains(@data-hydro-click, 'repository')]");
+
+                    if (allRepoLinks != null)
+                    {
+                        int simpleCount = 1;
+                        var seenRepos = new HashSet<string>();
+
+                        foreach (var link in allRepoLinks)
+                        {
+                            string repoText = WebUtility.HtmlDecode(link.InnerText.Trim());
+
+                            // Фильтруем: должно быть "/" в названии (author/repo)
+                            if (repoText.Contains("/") &&
+                                !repoText.Contains(" ") &&
+                                repoText.Length > 3 &&
+                                !seenRepos.Contains(repoText))
+                            {
+                                Console.WriteLine($"{simpleCount}. {repoText}");
+                                seenRepos.Add(repoText);
+                                simpleCount++;
+
+                                if (simpleCount > 6) break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // САМЫЙ ПРОСТОЙ ВАРИАНТ - демо-данные 
+                        Console.WriteLine("Показываю демонстрационные данные:\n");
+
+                        ShowDemoRepositories();
+                    }
+                }
+
+                Console.WriteLine("Источник: https://github.com/trending");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Ошибка: {ex.Message}");
+                Trace.WriteLine($"Ошибка ParseGitHubTrending: {ex.Message}");
+
+                // Всегда показываем демо-данные при ошибке
+                Console.WriteLine("\n--- Демо-данные ---\n");
+                ShowDemoRepositories();
+            }
+
+            Trace.WriteLine("Конец парсинга GitHub Trending");
+        }
+
+        // Отдельный метод для демо-данных
+        private static void ShowDemoRepositories()
+        {
+            var demoRepos = new[]
+            {
+        "microsoft/vscode - Редактор кода от Microsoft",
+        "facebook/react - JavaScript библиотека для UI",
+        "torvalds/linux - Ядро операционной системы Linux",
+        "docker/compose - Инструмент для Docker-приложений",
+        "nodejs/node - Среда выполнения JavaScript",
+        "python/cpython - Интерпретатор Python"
+            };
+
+            for (int i = 0; i < demoRepos.Length; i++)
+            {
+                Console.WriteLine($"{i + 1}. {demoRepos[i]}");
+            }
         }
 
         public static async Task<bool> AddNews(Cookie token, string name, string src, string description)//реалтзован метод AddNews
@@ -106,6 +256,26 @@ namespace HttpNewsPAT
                 Console.WriteLine($"Ошибка: {ex.Message}");
                 return false;
             }
+        }
+        public static void ParsingHtml(string htmlCode)
+        {
+            Trace.WriteLine("Начало ParsingHtml");
+            var Html = new HtmlDocument();
+            Html.LoadHtml(htmlCode);
+
+            var Document = Html.DocumentNode;
+            IEnumerable<HtmlNode> DivNews = Document.Descendants(0).Where(x => x.HasClass("news"));
+
+            foreach (var DivNew in DivNews)
+            {
+                var src = DivNew.ChildNodes[1].GetAttributeValue("src", "node");
+                var name = DivNew.ChildNodes[3].InnerHtml;
+                var description = DivNew.ChildNodes[5].InnerHtml;
+
+                Trace.WriteLine($"Парсинг: name={name}, src={src}");
+                Console.WriteLine($"{name} \nИзображение: {src} \nОписание: {description}");
+            }
+            Trace.WriteLine("Конец ParsingHtml");
         }
 
         public static async Task<string> GetContent(Cookie token)  // МЕТОД GetContent ПЕРЕПИСАН НА HttpClient 
